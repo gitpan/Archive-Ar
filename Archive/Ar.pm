@@ -14,14 +14,14 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION @ISA @EXPORT);
-$VERSION = '1.0';
+$VERSION = '1.1';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
 use constant ARFMAG => "`\n";
 
 @ISA=qw(Exporter);
-@EXPORT=qw/read read_memory list_files add_files add_data write get_content DEBUG/;
+@EXPORT=qw/read read_memory list_files add_files add_data write get_content remove DEBUG/;
 
 sub new {
 	my ($class, $filenameorhandle, $debug) = @_;
@@ -105,6 +105,33 @@ sub read_memory
 	}
 
 	return length($data);
+}
+
+sub remove
+{
+	my($this, $filenameorarray, @otherfiles) = @_;
+
+	my $filelist;
+
+	if(ref $filenameorarray eq "ARRAY")
+	{
+		$filelist = $filenameorarray;
+	}else{
+		$filelist = [$filenameorarray];
+		if(@otherfiles)
+		{
+			push @$filelist, @otherfiles;
+		}      
+	}
+
+	my $filecount = 0;
+
+	foreach my $file (@$filelist)
+	{
+		$filecount += $this->_remFile($file);
+	}
+
+	return $filecount;
 }
 
 sub list_files
@@ -372,6 +399,22 @@ sub _addFile
 	return $file->{name};
 }
 
+sub _remFile
+{
+	my ($this, $filename) = @_;
+
+	return unless $filename;
+	if(exists($this->{_filehash}->{$filename}))
+	{
+		delete $this->{_filehash}->{$filename};
+		@{$this->{_files}} = grep(!/^$filename$/, @{$this->{_files}});
+		return 1;
+	}
+	
+	$this->_dowarn("Can't remove file $filename, because it doesn't exist in the archive");
+	return 0;
+}
+
 sub _initValues
 {
 	my ($this) = @_;
@@ -397,6 +440,7 @@ sub _dowarn
 
 1;
 
+__END__
 
 =head1 NAME
 
@@ -430,8 +474,8 @@ Archive::Ar is a pure-perl way to handle standard ar archives.
 This is useful if you have those types of old archives on the system, but it 
 is also useful because .deb packages for the Debian GNU/Linux distribution are 
 ar archives. This is one building block in a future chain of modules to build, 
-manipulate, extrace, and test debian modules with no platform or architecture 
-independance.
+manipulate, extract, and test debian modules with no platform or architecture 
+dependence.
 
 You may notice that the API to Archive::Ar is similar to Archive::Tar, and
 this was done intentionally to keep similarity between the Archive::*
@@ -442,9 +486,9 @@ modules
 
 =over 4
 
-=item new()
-=item new($filename);
-=item new(*GLOB, $debug);
+=item * C<new()>
+=item * C<new(I<$filename>)>
+=item * C<new(I<*GLOB>,I<$debug>)>
 
 Returns a new Archive::Ar object.  Without a filename or glob, it returns an
 empty object.  If passed a filename as a scalar or in a GLOB, it will attempt
@@ -452,123 +496,188 @@ to populate from either of those sources.  If it fails, you will receive
 undef, instead of an object reference. 
 
 This also can take a second optional debugging parameter.  This acts exactly
-as if DEBUG() is called on the object before it is returned.  If you have a
-new() that keeps failing, this should help.
+as if C<DEBUG()> is called on the object before it is returned.  If you have a
+C<new()> that keeps failing, this should help.
 
-=item read($filename)
-=item read(*GLOB);
+=back
+
+=item * C<read(I<$filename>)>
+=item * C<read(I<*GLOB>)>;
+
+=over 4
 
 This reads a new file into the object, removing any ar archive already
-represented in the object.  Any calls to DEBUG() are not lost by reading
+represented in the object.  Any calls to C<DEBUG()> are not lost by reading
 in a new file. Returns the number of bytes read, undef on failure.
 
-=item read_memory($data)
+=back
+
+=item * C<read_memory(I<$data>)>
+
+=over 4
 
 This read information from the first parameter, and attempts to parse and treat
-it like an ar archive. Like read(), it will wipe out whatever you have in the
+it like an ar archive. Like C<read()>, it will wipe out whatever you have in the
 object and replace it with the contents of the new archive, even if it fails.
 Returns the number of bytes read (processed) if successful, undef otherwise.
 
-=item list_files()
+=back
+
+=item * C<list_files()>
+
+=over 4
 
 This lists the files contained inside of the archive by filename, as an 
 array.
 
-=item add_files("filename1", "filename2")
-=item add_files(["filename1", "filename2"])
+=back
+
+=item * C<add_files(I<"filename1">, I<"filename2">)>
+=item * C<add_files(I<["filename1", "filename2"]>)>
+
+=over 4
 
 Takes an array or an arrayref of filenames to add to the ar archive, in order.
 The filenames can be paths to files, in which case the path information is 
 stripped off.  Filenames longer than 16 characters are truncated when written
 to disk in the format, so keep that in mind when adding files.
 
-Due to the nature of the ar archive format, add_files() will store the uid,
-gid, mode, size, and creation date of the file as returned by stat(); 
+Due to the nature of the ar archive format, C<add_files()> will store the uid,
+gid, mode, size, and creation date of the file as returned by C<stat()>; 
 
-add_files() returns the number of files sucessfully added, or undef on failure.
+C<add_files()> returns the number of files successfully added, or undef on failure.
 
-=item add_data("filename", $filedata)
+=back
 
-Takes an filename and a set of data to represent it. Unlike add_files, add_data
+=item * C<add_data(I<"filename">, I<$filedata>)>
+
+=over 4
+
+Takes an filename and a set of data to represent it. Unlike C<add_files>, C<add_data>
 is a virtual add, and does not require data on disk to be present. The
 data is a hash that looks like:
 
-$filedata = {
+	$filedata = {
         "data" => $data,
         "uid" => $uid, #defaults to zero
         "gid" => $gid, #defaults to zero
         "date" => $date,  #date in epoch seconds. Defaults to now.
         "mode" => $mode, #defaults to "100644";
-}
+	}
 
 You cannot add_data over another file however.  This returns the file length in 
 bytes if it is successful, undef otherwise.
 
-=item write()
-=item write("filename.ar")
+=back
+
+=item * C<write()>
+=item * C<write(I<"filename.ar">)>
+
+=over 4
 
 This method will return the data as an .ar archive, or will write to the 
-filename present if specified.  If given a filename, write() will return the 
+filename present if specified.  If given a filename, C<write()> will return the 
 length of the file written, in bytes, or undef on failure.  If the filename
 already exists, it will overwrite that file.
 
-=item get_content("filename")
+=back
+
+=item * C<get_content(I<"filename">)>
+
+=over 4
 
 This returns a hash with the file content in it, including the data that the 
 file would naturally contain.  If the file does not exist or no filename is
 given, this returns undef. On success, a hash is returned with the following
 keys:
 
-name - The file name
-date - The file date (in epoch seconds)
-uid  - The uid of the file
-gid  - The gid of the file
-mode - The mode permissions
-size - The size (in bytes) of the file
-data - The contained data
+	name - The file name
+	date - The file date (in epoch seconds)
+	uid  - The uid of the file
+	gid  - The gid of the file
+	mode - The mode permissions
+	size - The size (in bytes) of the file
+	data - The contained data
+=back
 
-=item DEBUG()
+
+=item * C<remove(I<"filename1">, I<"filename2">)>
+=item * C<remove(I<["filename1", "filename2"]>)>
+
+=over 4
+
+The remove method takes a filenames as a list or as an arrayref, and removes
+them, one at a time, from the Archive::Ar object.  This returns the number
+of files successfully removed from the archive.
+
+=back
+
+=item * C<DEBUG()>
+
+=over 4
 
 This method turns on debugging.  Optionally this can be done by passing in a 
 value as the second parameter to new.  While verbosity is enabled, 
-Archive::Ar will toss a warn() if there is a suspicious condition or other 
+Archive::Ar will toss a C<warn()> if there is a suspicious condition or other 
 problem while proceeding. This should help iron out any problems you have
 while using the module.
+
+=back
 
 =head1 CHANGES
 
 =over 4
  
-=item Version 1.0
+=item * B<Version 1.1> - April 10th, 2003>
+
+Documentation cleanups
+Added a C<remove()> function
+
+=item * B<Version 1.0> - April 7th, 2003
 
 This is the initial public release for CPAN, so everything is new.
 
+=back
+
 =head1 TODO
+
+=over 4
 
 A better unit test suite perhaps. I have a private one, but a public one would be
 nice if there was good file faking module.
 
 Fix / investigate stuff in the BUGS section.
 
+=back
+
 =head1 BUGS
+
+=over 4
 
 To be honest, I'm not sure of a couple of things. The first is that I know 
 of ar archives made on old AIX systems (pre 4.3?) that have a different header
 with a different magic string, etc.  This module perfectly (hopefully) handles
-ar archives made with the modern ar command from the binutils distribtuion. If
+ar archives made with the modern ar command from the binutils distribution. If
 anyone knows of anyway to produce these old-style AIX archives, or would like
 to produce a few for testing, I would be much grateful.
 
-There's no really good reason why this module /shouldn't/ run on Win32 
+There's no really good reason why this module I<shouldn't> run on Win32 
 platforms, but admittedly, this might change when we have a file exporting 
 function that supports owner and permission writing.
 
 If you read in and write out a file, you get different md5sums, but it's still
 a valid archive. I'm still investigating this, and consider it a minor bug.
 
+=back
+
 =head1 COPYRIGHT
+
+=over 4
+
 Archive::Ar is copyright 2003 Jay Bonci E<lt>jaybonci@cpan.orgE<gt>. 
 This program is free software; you can redistribute it and/or modify it under
 the same terms as Perl itself.
+
+=back
 
 =cut
