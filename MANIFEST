@@ -1,4 +1,4 @@
-Archive/Ar.pm
+lib/Archive/Ar.pm
 Makefile.PL
 t/10objects.t
 t/20new.t

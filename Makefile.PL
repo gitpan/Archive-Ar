@@ -2,7 +2,7 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
 	'NAME'		=> 'Archive::Ar',
-	'VERSION_FROM'	=> 'Archive/Ar.pm', # finds $VERSION
+	'VERSION_FROM'	=> 'lib/Archive/Ar.pm', # finds $VERSION
 	'PREREQ_PM'	=>
 		{ 
 			'Test::More' => '0.45',
@@ -20,7 +20,7 @@ WriteMakefile(
 
 	($] >= 5.005 ?    ## Add these new keywords supported since 5.005
 		(
-			ABSTRACT_FROM	=> 'Archive/Ar.pm', # retrieve abstract from module
+			ABSTRACT_FROM	=> 'lib/Archive/Ar.pm', # retrieve abstract from module
 			AUTHOR     	=> 'Jay Bonci <jay@bonci.com>') 
 		: ()),
 );

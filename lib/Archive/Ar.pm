@@ -14,7 +14,7 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION);
-$VERSION = '1.13';
+$VERSION = '1.13b';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
@@ -360,7 +360,7 @@ sub _readFromFilehandle
 	return unless $filehandle;
 
 	#handle has to be open
-	return unless(fileno $filehandle);
+	return unless fileno $filehandle;
 
 	local $/ = undef;
 	$this->{_filedata} = <$filehandle>;
@@ -634,6 +634,11 @@ while using the module.
 =head1 CHANGES
 
 =over 4
+
+=item * B<Version 1.13b> - May 7th, 2003
+
+Fixes to the Makefile.PL file. Ar.pm wasn't being put into /blib
+Style fix to a line with non-standard unless parenthesis
 
 =item * B<Version 1.13> - April 30th, 2003
 
