@@ -3,3 +3,4 @@ Makefile.PL
 t/10objects.t
 t/20new.t
 MANIFEST
+CHANGES

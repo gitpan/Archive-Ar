@@ -14,7 +14,7 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION @ISA @EXPORT);
-$VERSION = '1.11';
+$VERSION = '1.12';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
@@ -506,11 +506,11 @@ C<new()> that keeps failing, this should help.
 
 =back
 
+=over 4
+
 =item * C<read(I<$filename>)>
 
 =item * C<read(I<*GLOB>)>;
-
-=over 4
 
 This reads a new file into the object, removing any ar archive already
 represented in the object.  Any calls to C<DEBUG()> are not lost by reading
@@ -518,9 +518,9 @@ in a new file. Returns the number of bytes read, undef on failure.
 
 =back
 
-=item * C<read_memory(I<$data>)>
-
 =over 4
+
+=item * C<read_memory(I<$data>)>
 
 This read information from the first parameter, and attempts to parse and treat
 it like an ar archive. Like C<read()>, it will wipe out whatever you have in the
@@ -529,20 +529,19 @@ Returns the number of bytes read (processed) if successful, undef otherwise.
 
 =back
 
-=item * C<list_files()>
-
 =over 4
 
-This lists the files contained inside of the archive by filename, as an 
-array.
+=item * C<list_files()>
+
+This lists the files contained inside of the archive by filename, as an array.
 
 =back
+
+=over 4
 
 =item * C<add_files(I<"filename1">, I<"filename2">)>
 
 =item * C<add_files(I<["filename1", "filename2"]>)>
-
-=over 4
 
 Takes an array or an arrayref of filenames to add to the ar archive, in order.
 The filenames can be paths to files, in which case the path information is 
@@ -556,9 +555,9 @@ C<add_files()> returns the number of files successfully added, or undef on failu
 
 =back
 
-=item * C<add_data(I<"filename">, I<$filedata>)>
-
 =over 4
+
+=item * C<add_data(I<"filename">, I<$filedata>)>
 
 Takes an filename and a set of data to represent it. Unlike C<add_files>, C<add_data>
 is a virtual add, and does not require data on disk to be present. The
@@ -577,11 +576,12 @@ bytes if it is successful, undef otherwise.
 
 =back
 
+=over 4
+
+
 =item * C<write()>
 
 =item * C<write(I<"filename.ar">)>
-
-=over 4
 
 This method will return the data as an .ar archive, or will write to the 
 filename present if specified.  If given a filename, C<write()> will return the 
@@ -590,9 +590,9 @@ already exists, it will overwrite that file.
 
 =back
 
-=item * C<get_content(I<"filename">)>
-
 =over 4
+
+=item * C<get_content(I<"filename">)>
 
 This returns a hash with the file content in it, including the data that the 
 file would naturally contain.  If the file does not exist or no filename is
@@ -606,14 +606,15 @@ keys:
 	mode - The mode permissions
 	size - The size (in bytes) of the file
 	data - The contained data
+
 =back
 
+
+=over 4
 
 =item * C<remove(I<"filename1">, I<"filename2">)>
 
 =item * C<remove(I<["filename1", "filename2"]>)>
-
-=over 4
 
 The remove method takes a filenames as a list or as an arrayref, and removes
 them, one at a time, from the Archive::Ar object.  This returns the number
@@ -621,9 +622,9 @@ of files successfully removed from the archive.
 
 =back
 
-=item * C<DEBUG()>
-
 =over 4
+
+=item * C<DEBUG()>
 
 This method turns on debugging.  Optionally this can be done by passing in a 
 value as the second parameter to new.  While verbosity is enabled, 
@@ -637,11 +638,15 @@ while using the module.
 
 =over 4
 
+=item * B<Version 1.12> - April 14th, 2003
+
+Found podchecker. CPAN HTML documentation should work right now.
+
 =item * B<Version 1.11> - April 10th, 2003
 
 Trying to get the HTML POD documentation to come out correctly
- 
-=item * B<Version 1.1> - April 10th, 2003>
+
+=item * B<Version 1.1> - April 10th, 2003
 
 Documentation cleanups
 Added a C<remove()> function
@@ -654,18 +659,12 @@ This is the initial public release for CPAN, so everything is new.
 
 =head1 TODO
 
-=over 4
-
 A better unit test suite perhaps. I have a private one, but a public one would be
 nice if there was good file faking module.
 
 Fix / investigate stuff in the BUGS section.
 
-=back
-
 =head1 BUGS
-
-=over 4
 
 To be honest, I'm not sure of a couple of things. The first is that I know 
 of ar archives made on old AIX systems (pre 4.3?) that have a different header
@@ -681,16 +680,10 @@ function that supports owner and permission writing.
 If you read in and write out a file, you get different md5sums, but it's still
 a valid archive. I'm still investigating this, and consider it a minor bug.
 
-=back
-
 =head1 COPYRIGHT
-
-=over 4
 
 Archive::Ar is copyright 2003 Jay Bonci E<lt>jaybonci@cpan.orgE<gt>. 
 This program is free software; you can redistribute it and/or modify it under
 the same terms as Perl itself.
-
-=back
 
 =cut
