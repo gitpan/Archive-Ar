@@ -14,7 +14,7 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION @ISA @EXPORT);
-$VERSION = '1.1';
+$VERSION = '1.11';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
@@ -448,23 +448,26 @@ Archive::Ar - Interface for manipulating ar archives
 
 =head1 SYNOPSIS
 
-use Archive::Ar;
+	use Archive::Ar;
 
-my $ar = new Archive::Ar("./foo.ar");
+	my $ar = new Archive::Ar("./foo.ar");
 
-$ar->add_data("newfile.txt","Some contents", $properties);
+	$ar->add_data("newfile.txt","Some contents", $properties);
 
-$ar->add_files("./bar.tar.gz", "bat.pl")
-$ar->add_files(["./again.gz"]);
+	$ar->add_files("./bar.tar.gz", "bat.pl")
+	$ar->add_files(["./again.gz"]);
 
-my $filedata = $ar->get_content("bar.tar.gz");
+	$ar->remove("file1", "file2");
+	$ar->remove(["file1", "file2");
 
-my @files = $ar->list_files();
-$ar->read("foo.deb");
+	my $filedata = $ar->get_content("bar.tar.gz");
 
-$ar->write("outbound.ar");
+	my @files = $ar->list_files();
+	$ar->read("foo.deb");
 
-$ar->DEBUG();
+	$ar->write("outbound.ar");
+
+	$ar->DEBUG();
 
 
 =head1 DESCRIPTION
@@ -487,7 +490,9 @@ modules
 =over 4
 
 =item * C<new()>
+
 =item * C<new(I<$filename>)>
+
 =item * C<new(I<*GLOB>,I<$debug>)>
 
 Returns a new Archive::Ar object.  Without a filename or glob, it returns an
@@ -502,6 +507,7 @@ C<new()> that keeps failing, this should help.
 =back
 
 =item * C<read(I<$filename>)>
+
 =item * C<read(I<*GLOB>)>;
 
 =over 4
@@ -533,6 +539,7 @@ array.
 =back
 
 =item * C<add_files(I<"filename1">, I<"filename2">)>
+
 =item * C<add_files(I<["filename1", "filename2"]>)>
 
 =over 4
@@ -571,6 +578,7 @@ bytes if it is successful, undef otherwise.
 =back
 
 =item * C<write()>
+
 =item * C<write(I<"filename.ar">)>
 
 =over 4
@@ -602,6 +610,7 @@ keys:
 
 
 =item * C<remove(I<"filename1">, I<"filename2">)>
+
 =item * C<remove(I<["filename1", "filename2"]>)>
 
 =over 4
@@ -627,6 +636,10 @@ while using the module.
 =head1 CHANGES
 
 =over 4
+
+=item * B<Version 1.11> - April 10th, 2003
+
+Trying to get the HTML POD documentation to come out correctly
  
 =item * B<Version 1.1> - April 10th, 2003>
 
