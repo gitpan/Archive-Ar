@@ -13,15 +13,12 @@ use Exporter;
 use File::Spec;
 use Time::Local;
 
-use vars qw($VERSION @ISA @EXPORT);
-$VERSION = '1.12';
+use vars qw($VERSION);
+$VERSION = '1.13';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
 use constant ARFMAG => "`\n";
-
-@ISA=qw(Exporter);
-@EXPORT=qw/read read_memory list_files add_files add_data write get_content remove DEBUG/;
 
 sub new {
 	my ($class, $filenameorhandle, $debug) = @_;
@@ -637,6 +634,10 @@ while using the module.
 =head1 CHANGES
 
 =over 4
+
+=item * B<Version 1.13> - April 30th, 2003
+
+Removed unneeded exports. Thanks to pudge for the pointer.
 
 =item * B<Version 1.12> - April 14th, 2003
 
