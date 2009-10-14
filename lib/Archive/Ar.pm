@@ -14,7 +14,7 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION);
-$VERSION = '1.13b';
+$VERSION = '1.14';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
@@ -135,7 +135,7 @@ sub list_files
 {
 	my($this) = @_;
 
-	return \@{$this->{_files}};
+	return wantarray ? @{$this->{_files}} : $this->{_files};
 
 }
 
@@ -219,7 +219,7 @@ sub add_data
 	$params->{uid} ||= 0;
 	$params->{gid} ||= 0;
 	$params->{date} ||= timelocal(localtime());
-	$params->{mode} ||= "100644";
+	$params->{mode} ||= 0100644;
 	
 	unless($this->_addFile($params))
 	{
@@ -252,10 +252,16 @@ sub write
 
 		$content->{uid} ||= "";
 		$content->{gid} ||= "";
-
-		$outstr.= pack("A16A12A6A6A8A10", @$content{qw/name date uid gid mode size/});
+		$outstr.= pack("A16A12A6A6A8A10",
+			@$content{qw/name date uid gid/},
+			sprintf('%o', $content->{mode}),  # octal!
+			$content->{size});
 		$outstr.= ARFMAG;
 		$outstr.= $content->{data};
+		unless (((length($content->{data})) % 2) == 0) {
+			# Padding to make up an even number of bytes
+			$outstr.= "\n";
+		}
 	}
 
 	return $outstr unless $filename;
@@ -319,20 +325,21 @@ sub _parseData
 	while($scratchdata =~ /\S/)
 	{
 
-		if($scratchdata =~ s/^(.{58})`\n//m)		
+		if($scratchdata =~ s/^(.{58})`\n//s)
 		{
-			my @fields = unpack("A16A12A6A6A8A10", $1);
-
-			for(0..@fields)
-			{
-				$fields[$_] ||= "";
-				$fields[$_] =~ s/\s*$//g;
-			}
-
 			my $headers = {};
-			@$headers{qw/name date uid gid mode size/} = @fields;
+			@$headers{qw/name date uid gid mode size/} =
+				unpack("A16A12A6A6A8A10", $1);
+
+			for (values %$headers) {
+				$_ ||= "";
+				$_ =~ s/\s*$//;
+			}
+			$headers->{mode} = oct($headers->{mode});
 
 			$headers->{data} = substr($scratchdata, 0, $headers->{size}, "");
+			# delete padding, if any
+			substr($scratchdata, 0, $headers->{size} % 2, "");
 
 			$this->_addFile($headers);
 		}else{
@@ -531,6 +538,7 @@ Returns the number of bytes read (processed) if successful, undef otherwise.
 =item * C<list_files()>
 
 This lists the files contained inside of the archive by filename, as an array.
+If called in a scalar context, returns a reference to an array.
 
 =back
 
@@ -565,7 +573,7 @@ data is a hash that looks like:
         "uid" => $uid, #defaults to zero
         "gid" => $gid, #defaults to zero
         "date" => $date,  #date in epoch seconds. Defaults to now.
-        "mode" => $mode, #defaults to "100644";
+        "mode" => $mode, #defaults to 0100644;
 	}
 
 You cannot add_data over another file however.  This returns the file length in 
@@ -634,6 +642,16 @@ while using the module.
 =head1 CHANGES
 
 =over 4
+
+=item * B<Version 1.14> - October 14, 2009
+
+Fix list_files to return a list in list context, to match doc.
+
+Pad odd-size archives to an even number of bytes.
+Closes RT #18383 (thanks to David Dick).
+
+Fixed broken file perms (decimal mode stored as octal string).
+Closes RT #49987 (thanks to Stephen Gran - debian bug #523515).
 
 =item * B<Version 1.13b> - May 7th, 2003
 
