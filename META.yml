@@ -1,18 +1,26 @@
 --- #YAML:1.0
-name:                Archive-Ar
-version:             1.14
-abstract:            Interface for manipulating ar archives
-license:             ~
-author:              
+name:               Archive-Ar
+version:            1.15
+abstract:           Interface for manipulating ar archives
+author:
     - Jay Bonci <jay@bonci.com>
-generated_by:        ExtUtils::MakeMaker version 6.42
-distribution_type:   module
-requires:     
-    File::Spec:                    0.83
-    File::Temp:                    0
-    Test::MockObject:              0.12
-    Test::More:                    0.45
-    Time::Local:                   1.04
+license:            unknown
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
+requires:
+    File::Spec:        0.83
+    File::Temp:        0
+    Test::MockObject:  0.12
+    Test::More:        0.45
+    Time::Local:       1.04
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.57_05
 meta-spec:
-    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
-    version: 1.3
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4

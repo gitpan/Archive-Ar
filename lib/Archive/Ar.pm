@@ -14,7 +14,7 @@ use File::Spec;
 use Time::Local;
 
 use vars qw($VERSION);
-$VERSION = '1.14';
+$VERSION = '1.15';
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
@@ -183,6 +183,7 @@ sub add_files
 			$this->_dowarn("Could not open filename. add_files() for this file failed");
 			next;
 		}
+		binmode HANDLE;
 		$header->{data} = <HANDLE>;
 		close HANDLE;
 
@@ -271,6 +272,7 @@ sub write
 		$this->_dowarn("Can't open filename $filename");
 		return;
 	}
+	binmode HANDLE;
 	print HANDLE $outstr;
 	close HANDLE;
 	return length($outstr);
@@ -357,6 +359,7 @@ sub _readFromFilename
 
 	my $handle;
 	open $handle, $filename or return;
+	binmode $handle;
 	return $this->_readFromFilehandle($handle);
 }
 
@@ -642,6 +645,10 @@ while using the module.
 =head1 CHANGES
 
 =over 4
+
+=item * B<Version 1.15> - May 14, 2013
+
+Use binmode for portability.  Closes RT #81310 (thanks to Stanislav Meduna).
 
 =item * B<Version 1.14> - October 14, 2009
 
