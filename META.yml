@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Archive-Ar
-version:            1.17
+version:            2.00
 abstract:           Interface for manipulating ar archives
 author:
     - Jay Bonci <jay@bonci.com>
@@ -11,11 +11,15 @@ configure_requires:
 build_requires:
     ExtUtils::MakeMaker:  0
 requires:
-    File::Spec:        0.83
+    File::Spec:        0
     File::Temp:        0
-    Test::MockObject:  0.12
-    Test::More:        0.45
-    Time::Local:       1.04
+    Test::MockObject:  0
+    Test::More:        0
+resources:
+    repository:
+        type:  git
+        url:   https://github.com/jbazik/Archive-Ar.git
+        web:   https://github.com/jbazik/Archive-Ar
 no_index:
     directory:
         - t
@@ -23,4 +27,4 @@ no_index:
 generated_by:       ExtUtils::MakeMaker version 6.57_05
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
-    version:  1.4
+    version:  2

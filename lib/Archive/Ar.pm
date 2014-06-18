@@ -1,447 +1,493 @@
-package Archive::Ar;
-
 ###########################################################
-#	Archive::Ar - Pure perl module to handle ar achives
-#	
-#	Copyright 2003 - Jay Bonci <jaybonci@cpan.org>
-#	Licensed under the same terms as perl itself
+#    Archive::Ar - Pure perl module to handle ar achives
+#    
+#    Copyright 2003 - Jay Bonci <jaybonci@cpan.org>
+#    Copyright 2014 - John Bazik <jbazik@cpan.org>
+#    Licensed under the same terms as perl itself
 #
 ###########################################################
+package Archive::Ar;
+
+use base qw(Exporter);
+our @EXPORT_OK = qw(COMMON BSD GNU);
 
 use strict;
-use Exporter;
 use File::Spec;
 use Time::Local;
+use Carp qw(carp longmess);
 
 use vars qw($VERSION);
-$VERSION = '1.17';
+$VERSION = '2.00';
+
+use constant CAN_CHOWN => ($> == 0 and $^O ne 'MacOS' and $^O ne 'MSWin32');
 
 use constant ARMAG => "!<arch>\n";
 use constant SARMAG => length(ARMAG);
 use constant ARFMAG => "`\n";
+use constant AR_EFMT1 => "#1/";
+
+use constant COMMON => 1;
+use constant BSD => 2;
+use constant GNU => 3;
+
+my $has_io_string;
+BEGIN {
+    $has_io_string = eval {
+        require IO::String;
+        IO::String->import();
+        1;
+    } || 0;
+}
 
 sub new {
-	my ($class, $filenameorhandle, $debug) = @_;
+    my $class = shift;
+    my $file = shift;
+    my $opts = shift || 0;
+    my $self = bless {}, $class;
+    my $defopts = {
+        chmod => 1,
+        chown => 1,
+        same_perms => ($> == 0) ? 1:0,
+    };
+    $opts = {warn => $opts} unless ref $opts;
 
-	my $this = {};
-
-	my $obj = bless $this, $class;
-
-	$obj->{_verbose} = 0;
-	$obj->_initValues();
-
-
-	if($debug)
-	{
-		$obj->DEBUG();
-	}
-
-	if($filenameorhandle){
-		unless($obj->read($filenameorhandle)){
-			$obj->_dowarn("new() failed on filename or filehandle read");
-			return;
-		}		
-	}
-
-	return $obj;
+    $self->clear();
+    $self->{opts} = {(%$defopts, %{$opts})};
+    if ($file) {
+        return unless $self->read($file);
+    }
+    return $self;
 }
 
-sub read
-{
-	my ($this, $filenameorhandle) = @_;
+sub set_opt {
+    my $self = shift;
+    my $name = shift;
+    my $val = shift;
 
-	my $retval;
-
-	$this->_initValues();
-
-	if(ref $filenameorhandle eq "GLOB")
-	{
-		unless($retval = $this->_readFromFilehandle($filenameorhandle))
-		{
-			$this->_dowarn("Read from filehandle failed");
-			return;
-		}
-	}else
-	{
-		unless($retval = $this->_readFromFilename($filenameorhandle))
-		{
-			$this->_dowarn("Read from filename failed");
-			return;
-		}
-	}
-
-
-	unless($this->_parseData())
-	{
-		$this->_dowarn("read() failed on data structure analysis. Probable bad file");
-		return; 
-	}
-
-	
-	return $retval;
+    $self->{opts}->{$name} = $val;
 }
 
-sub read_memory
-{
-	my ($this, $data) = @_;
+sub get_opt {
+    my $self = shift;
+    my $name = shift;
 
-	$this->_initValues();
-
-	unless($data)
-	{
-		$this->_dowarn("read_memory() can't continue because no data was given");
-		return;
-	}
-
-	$this->{_filedata} = $data;
-
-	unless($this->_parseData())
-	{
-		$this->_dowarn("read_memory() failed on data structure analysis. Probable bad file");
-		return;
-	}
-
-	return length($data);
+    return $self->{opts}->{$name};
 }
 
-sub remove
-{
-	my($this, $filenameorarray, @otherfiles) = @_;
-
-	my $filelist;
-
-	if(ref $filenameorarray eq "ARRAY")
-	{
-		$filelist = $filenameorarray;
-	}else{
-		$filelist = [$filenameorarray];
-		if(@otherfiles)
-		{
-			push @$filelist, @otherfiles;
-		}      
-	}
-
-	my $filecount = 0;
-
-	foreach my $file (@$filelist)
-	{
-		$filecount += $this->_remFile($file);
-	}
-
-	return $filecount;
+sub type {
+    return shift->{type};
 }
 
-sub list_files
-{
-	my($this) = @_;
+sub clear {
+    my $self = shift;
 
-	return wantarray ? @{$this->{_files}} : $this->{_files};
-
+    $self->{names} = [];
+    $self->{files} = {};
+    $self->{type} = undef;
 }
 
-sub add_files
-{
-	my($this, $filenameorarray, @otherfiles) = @_;
-	
-	my $filelist;
+sub read {
+    my $self = shift;
+    my $file = shift;
 
-	if(ref $filenameorarray eq "ARRAY")
-	{
-		$filelist = $filenameorarray;
-	}else
-	{
-		$filelist = [$filenameorarray];
-		if(@otherfiles)
-		{
-			push @$filelist, @otherfiles;
-		}
-	}
-
-	my $filecount = 0;
-
-	foreach my $filename (@$filelist)
-	{
-		my @props = stat($filename);
-		unless(@props)
-		{
-			$this->_dowarn("Could not stat() filename. add_files() for this file failed");
-			next;
-		}
-		my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = @props;  
-		
-		my $header = {
-			"date" => $mtime,
-			"uid"  => $uid,
-			"gid"  => $gid, 
-			"mode" => $mode,
-			"size" => $size,
-		};
-
-		local $/ = undef;
-		unless(open HANDLE, $filename)
-		{
-			$this->_dowarn("Could not open filename. add_files() for this file failed");
-			next;
-		}
-		binmode HANDLE;
-		$header->{data} = <HANDLE>;
-		close HANDLE;
-
-		# fix the filename
-
-		(undef, undef, $filename) = File::Spec->splitpath($filename);
-		$header->{name} = $filename;
-
-		$this->_addFile($header);
-
-		$filecount++;
-	}
-
-	return $filecount;
+    my $fh = $self->_get_handle($file);
+    local $/ = undef;
+    my $data = <$fh>;
+    close $fh;
+        
+    return $self->read_memory($data);
 }
 
-sub add_data
-{
-	my($this, $filename, $data, $params) = @_;
-	unless ($filename)
-	{
-		$this->_dowarn("No filename given; add_data() can't proceed");
-		return;
-	}
+sub read_memory {
+    my $self = shift;
+    my $data = shift;
 
-	$params ||= {};
-	$data ||= "";
-	
-	(undef, undef, $filename) = File::Spec->splitpath($filename);
-	
-	$params->{name} = $filename;	
-	$params->{size} = length($data);
-	$params->{data} = $data;
-	$params->{uid} ||= 0;
-	$params->{gid} ||= 0;
-	$params->{date} ||= timelocal(localtime());
-	$params->{mode} ||= 0100644;
-	
-	unless($this->_addFile($params))
-	{
-		$this->_dowarn("add_data failed due to a failure in _addFile");
-		return;
-	}
-
-	return $params->{size}; 	
+    $self->clear();
+    return unless $self->_parse($data);
+    return length($data);
 }
 
-sub write
-{
-	my($this, $filename) = @_;
+sub contains_file {
+    my $self = shift;
+    my $filename = shift;
 
-	my $outstr;
-
-	$outstr= ARMAG;
-	foreach(@{$this->{_files}})
-	{
-		my $content = $this->get_content($_);
-		unless($content)
-		{
-			$this->_dowarn("Internal Error. $_ file in _files list but no filedata");
-			next;
-		}
-		
-
-		# For whatever reason, the uids and gids get stripped
-		# if they are zero. We'll blank them here to emulate that
-
-		$content->{uid} ||= "";
-		$content->{gid} ||= "";
-		$outstr.= pack("A16A12A6A6A8A10",
-			@$content{qw/name date uid gid/},
-			sprintf('%o', $content->{mode}),  # octal!
-			$content->{size});
-		$outstr.= ARFMAG;
-		$outstr.= $content->{data};
-		unless (((length($content->{data})) % 2) == 0) {
-			# Padding to make up an even number of bytes
-			$outstr.= "\n";
-		}
-	}
-
-	return $outstr unless $filename;
-
-	unless(open HANDLE, ">$filename")
-	{
-		$this->_dowarn("Can't open filename $filename");
-		return;
-	}
-	binmode HANDLE;
-	print HANDLE $outstr;
-	close HANDLE;
-	return length($outstr);
+    return unless defined $filename;
+    return exists $self->{files}->{$filename};
 }
 
-sub get_content
-{
-	my ($this, $filename) = @_;
+sub extract {
+    my $self = shift;
 
-	unless($filename)
-	{
-		$this->_dowarn("get_content can't continue without a filename");
-		return;
-	}
-
-	unless(exists($this->{_filehash}->{$filename}))
-	{
-		$this->_dowarn("get_content failed because there is not a file named $filename");
-		return;
-	}
-
-	return $this->{_filehash}->{$filename};
+    for my $filename (@_ or @{$self->{names}}) {
+        $self->extract_file($filename) or return;
+    }
+    return 1;
 }
 
-sub DEBUG
-{
-	my($this, $verbose) = @_;
-	$verbose = 1 unless(defined($verbose) and int($verbose) == 0);
-	$this->{_verbose} = $verbose;
-	return;
+sub extract_file {
+    my $self = shift;
+    my $filename = shift;
+    my $target = shift || $filename;
 
+    my $meta = $self->{files}->{$filename};
+    return $self->_error("$filename: not in archive") unless $meta;
+    open my $fh, '>', $target or return $self->_error("$target: $!");
+    binmode $fh;
+    syswrite $fh, $meta->{data} or return $self->_error("$filename: $!");
+    close $fh or return $self->_error("$filename: $!");
+    if (CAN_CHOWN && $self->{opts}->{chown}) {
+        chown $meta->{uid}, $meta->{gid}, $filename or
+					return $self->_error("$filename: $!");
+    }
+    if ($self->{opts}->{chmod}) {
+        my $mode = $meta->{mode};
+        unless ($self->{opts}->{same_perms}) {
+            $mode &= ~(oct(7000) | (umask | 0));
+        }
+        chmod $mode, $filename or return $self->_error("$filename: $!");
+    }
+    utime $meta->{date}, $meta->{date}, $filename or
+					return $self->_error("$filename: $!");
+    return 1;
 }
 
-sub _parseData
-{
-	my($this) = @_;
+sub rename {
+    my $self = shift;
+    my $filename = shift;
+    my $target = shift;
 
-	unless($this->{_filedata})
-	{
-		$this->_dowarn("Cannot parse this archive. It appears to be blank");
-		return;
-	}
-
-	my $scratchdata = $this->{_filedata};
-
-	unless(substr($scratchdata, 0, SARMAG, "") eq ARMAG)
-	{
-		$this->_dowarn("Bad magic header token. Either this file is not an ar archive, or it is damaged. If you are sure of the file integrity, Archive::Ar may not support this type of ar archive currently. Please report this as a bug");
-		return "";
-	}
-
-	while($scratchdata =~ /\S/)
-	{
-
-		if($scratchdata =~ s/^(.{58})`\n//s)
-		{
-			my $headers = {};
-			@$headers{qw/name date uid gid mode size/} =
-				unpack("A16A12A6A6A8A10", $1);
-
-			for (values %$headers) {
-				$_ =~ s/\s*$//;
-			}
-			$headers->{mode} = oct($headers->{mode});
-
-			$headers->{data} = substr($scratchdata, 0, $headers->{size}, "");
-			# delete padding, if any
-			substr($scratchdata, 0, $headers->{size} % 2, "");
-
-			$this->_addFile($headers);
-		}else{
-			$this->_dowarn("File format appears to be corrupt. The file header is not of the right size, or does not exist at all");
-			return;
-		}
-	}
-
-	return scalar($this->{_files});
+    if ($self->{files}->{$filename}) {
+        $self->{files}->{$target} = $self->{files}->{$filename};
+        delete $self->{files}->{$filename};
+        for (@{$self->{names}}) {
+            if ($_ eq $filename) {
+                $_ = $target;
+                last;
+            }
+        }
+    }
 }
 
-sub _readFromFilename
-{
-	my ($this, $filename) = @_;
+sub chmod {
+    my $self = shift;
+    my $filename = shift;
+    my $mode = shift;	# octal string or numeric
 
-	my $handle;
-	open $handle, $filename or return;
-	binmode $handle;
-	return $this->_readFromFilehandle($handle);
+    return unless $self->{files}->{$filename};
+    $self->{files}->{$filename}->{mode} =
+                                    $mode + 0 eq $mode ? $mode : oct($mode);
+    return 1;
 }
 
+sub chown {
+    my $self = shift;
+    my $filename = shift;
+    my $uid = shift;
+    my $gid = shift;
 
-sub _readFromFilehandle
-{
-	my ($this, $filehandle) = @_;
-	return unless $filehandle;
-
-	#handle has to be open
-	return unless fileno $filehandle;
-
-	local $/ = undef;
-	$this->{_filedata} = <$filehandle>;
-	close $filehandle;
-
-	return length($this->{_filedata});
+    return unless $self->{files}->{$filename};
+    $self->{files}->{$filename}->{uid} = $uid if $uid >= 0;
+    $self->{files}->{$filename}->{gid} = $gid if defined $gid && $gid >= 0;
+    return 1;
 }
 
-sub _addFile
-{
-	my ($this, $file) = @_;
+sub remove {
+    my $self = shift;
+    my $files = ref $_[0] ? shift : \@_;
 
-	return unless $file;
+    my $nfiles_orig = scalar @{$self->{names}};
 
-	foreach(qw/name date uid gid mode size data/)
-	{
-		unless(exists($file->{$_}))
-		{
-			$this->_dowarn("Can't _addFile because virtual file is missing $_ parameter");
-			return;
-		}
-	}
-	
-	if(exists($this->{_filehash}->{$file->{name}}))
-	{
-		$this->_dowarn("Can't _addFile because virtual file already exists with that name in the archive");
-		return;
-	}
+    for my $file (@$files) {
+        next unless $file;
+        if (exists($self->{files}->{$file})) {
+            delete $self->{files}->{$file};
+        }
+        else {
+            $self->_error("$file: no such member")
+        }
+    }
+    @{$self->{names}} = grep($self->{files}->{$_}, @{$self->{names}});
 
-	push @{$this->{_files}}, $file->{name};
-	$this->{_filehash}->{$file->{name}} = $file;
-
-	return $file->{name};
+    return $nfiles_orig - scalar @{$self->{names}};
 }
 
-sub _remFile
-{
-	my ($this, $filename) = @_;
+sub list_files {
+    my $self = shift;
 
-	return unless $filename;
-	if(exists($this->{_filehash}->{$filename}))
-	{
-		delete $this->{_filehash}->{$filename};
-		@{$this->{_files}} = grep(!/^$filename$/, @{$this->{_files}});
-		return 1;
-	}
-	
-	$this->_dowarn("Can't remove file $filename, because it doesn't exist in the archive");
-	return 0;
+    return wantarray ? @{$self->{names}} : $self->{names};
 }
 
-sub _initValues
-{
-	my ($this) = @_;
+sub add_files {
+    my $self = shift;
+    my $files = ref $_[0] ? shift : \@_;
 
-	$this->{_files} = [];
-	$this->{_filehash} = {};
-	$this->{_filedata} ="";
+    for my $path (@$files) {
+        if (open my $fd, $path) {
+            my @st = stat $fd or return $self->_error("$path: $!");
+            local $/ = undef;
+            binmode $fd;
+            my $content = <$fd>;
+            close $fd;
 
-	return;
+            my $filename = (File::Spec->splitpath($path))[2];
+
+            $self->_add_data($filename, $content, @st[9,4,5,2,7]);
+        }
+        else {
+            $self->_error("$path: $!");
+        }
+    }
+    return scalar @{$self->{names}};
 }
 
-sub _dowarn
-{
-	my ($this, $warning) = @_;
+sub add_data {
+    my $self = shift;
+    my $path = shift;
+    my $content = shift;
+    my $params = shift || {};
 
-	if($this->{_verbose})
-	{
-		warn "DEBUG: $warning";
-	}
+    return $self->_error("No filename given") unless $path;
 
-	return;
+    my $filename = (File::Spec->splitpath($path))[2];
+
+    $self->_add_data($filename, $content,
+                     $params->{date} || timelocal(localtime()),
+                     $params->{uid} || 0,
+                     $params->{gid} || 0,
+                     $params->{mode} || 0100644) or return;
+
+    return $self->{files}->{$filename}->{size};
+}
+
+sub write {
+    my $self = shift;
+    my $filename = shift;
+    my $opts = {(%{$self->{opts}}, %{shift || {}})};
+    my $type = $opts->{type} || $self->{type} || COMMON;
+
+    my @body = ( ARMAG );
+
+    my %gnuindex;
+    my @filenames = @{$self->{names}};
+    if ($type eq GNU) {
+        #
+        # construct extended filename index, if needed
+        #
+        if (my @longs = grep(length($_) > 15, @filenames)) {
+            my $ptr = 0;
+            for my $long (@longs) {
+                $gnuindex{$long . '/'} = $ptr;
+                $ptr += length($long) + 2;
+            }
+            push @body, pack('A16A32A10A2', '//', '', $ptr, ARFMAG),
+                        join("/\n", @longs, '');
+        }
+    }
+    for my $fn (@filenames) {
+        my $meta = $self->{files}->{$fn};
+        my $mode = sprintf('%o', $meta->{mode});
+        my $size = $meta->{size};
+
+        $fn .= '/' if $type eq GNU;
+
+        if (length($fn) <= 16 || $type eq COMMON) {
+            push @body, pack('A16A12A6A6A8A10A2', $fn,
+                              @$meta{qw/date uid gid/}, $mode, $size, ARFMAG);
+        }
+        elsif ($type eq GNU) {
+            push @body, pack('A1A15A12A6A6A8A10A2', '/', $gnuindex{$fn},
+                              @$meta{qw/date uid gid/}, $mode, $size, ARFMAG);
+        }
+        elsif ($type eq BSD) {
+            $size += length($fn);
+            push @body, pack('A3A13A12A6A6A8A10A2', AR_EFMT1, length($fn),
+                              @$meta{qw/date uid gid/}, $mode, $size, ARFMAG),
+                        $fn;
+        }
+        else {
+            return $self->_error("$type: unexpected ar type");
+        }
+        push @body, $meta->{data};
+        push @body, "\n" if $size % 2; # padding
+    }
+    if ($filename) {
+        my $fh = $self->_get_handle($filename, '>');
+        print $fh @body;
+        close $fh;
+        my $len = 0;
+        $len += length($_) for @body;
+        return $len;
+    }
+    else {
+        return join '', @body;
+    }
+}
+
+sub get_content {
+    my $self = shift;
+    my ($filename) = @_;
+
+    unless ($filename) {
+        $self->_error("get_content can't continue without a filename");
+        return;
+    }
+
+    unless (exists($self->{files}->{$filename})) {
+        $self->_error(
+                "get_content failed because there is not a file named $filename");
+        return;
+    }
+
+    return $self->{files}->{$filename};
+}
+
+sub get_data {
+    my $self = shift;
+    my $filename = shift;
+
+    return $self->_error("$filename: no such member")
+			unless exists $self->{files}->{$filename};
+    return $self->{files}->{$filename}->{data};
+}
+
+sub get_handle {
+    my $self = shift;
+    my $filename = shift;
+    my $fh;
+
+    return $self->_error("$filename: no such member")
+			unless exists $self->{files}->{$filename};
+    if ($has_io_string) {
+        $fh = IO::String->new($self->{files}->{$filename}->{data});
+    }
+    else {
+        my $data = $self->{files}->{$filename}->{data};
+        open $fh, '<', \$data or return $self->_error("in-memory file: $!");
+    }
+    return $fh;
+}
+
+sub error {
+    my $self = shift;
+
+    return shift() ? $self->{longmess} : $self->{error};
+}
+
+#
+# deprecated
+#
+sub DEBUG {
+    my $self = shift;
+    my $debug = shift;
+
+    $self->{opts}->{warn} = 1 unless (defined($debug) and int($debug) == 0);
+}
+
+sub _parse {
+    my $self = shift;
+    my $data = shift;
+
+    unless (substr($data, 0, SARMAG, '') eq ARMAG) {
+        return $self->_error("Bad magic number - not an ar archive");
+    }
+    my $type;
+    my $names;
+    while ($data =~ /\S/) {
+        my ($name, $date, $uid, $gid, $mode, $size, $magic) =
+                    unpack('A16A12A6A6A8A10a2', substr($data, 0, 60, ''));
+        unless ($magic eq "`\n") {
+            return $self->_error("Bad file header");
+        }
+        if ($name =~ m|^/|) {
+            $type = GNU;
+            if ($name eq '//') {
+                $names = substr($data, 0, $size, '');
+                next;
+            }
+            else {
+                $name = substr($names, int(substr($name, 1)));
+                $name =~ s/\n.*//;
+                chop $name;
+            }
+        }
+        elsif ($name =~ m|^#1/|) {
+            $type = BSD;
+            $name = substr($data, 0, int(substr($name, 3)), '');
+            $size -= length($name);
+        }
+        else {
+            if ($name =~ m|/$|) {
+                $type ||= GNU;	# only gnu has trailing slashes
+                chop $name;
+            }
+        }
+        $uid = int($uid);
+        $gid = int($gid);
+        $mode = oct($mode);
+        my $content = substr($data, 0, $size, '');
+        substr($data, 0, $size % 2, '');
+
+        $self->_add_data($name, $content, $date, $uid, $gid, $mode, $size);
+    }
+    $self->{type} = $type || COMMON;
+    return scalar @{$self->{names}};
+}
+
+sub _add_data {
+    my $self = shift;
+    my $filename = shift;
+    my $content = shift || '';
+    my $date = shift || timelocal(localtime());
+    my $uid = shift || 0;
+    my $gid = shift || 0;
+    my $mode = shift || 0100644;
+    my $size = shift || length($content);
+
+    if (exists($self->{files}->{$filename})) {
+        return $self->_error("$filename: entry already exists");
+    }
+    $self->{files}->{$filename} = {
+        name => $filename,
+        date => $date,
+        uid => $uid,
+        gid => $gid,
+        mode => $mode,
+        size => $size,
+        data => $content,
+    };
+    push @{$self->{names}}, $filename;
+    return 1;
+}
+
+sub _get_handle {
+    my $self = shift;
+    my $file = shift;
+    my $mode = shift || '<';
+
+    if (ref $file) {
+        return $file if eval{*$file{IO}} or $file->isa('IO::Handle');
+        return $self->_error("Not a filehandle");
+    }
+    else {
+        open my $fh, $mode, $file or return $self->_error("$file: $!");
+        binmode $fh;
+        return $fh;
+    }
+}
+
+sub _error {
+    my $self = shift;
+    my $msg = shift;
+
+    $self->{error} = $msg;
+    $self->{longerror} = longmess($msg);
+    if ($self->{opts}->{warn} > 1) {
+        carp $self->{longerror};
+    }
+    elsif ($self->{opts}->{warn}) {
+        carp $self->{error};
+    }
+    return;
 }
 
 1;
@@ -454,33 +500,38 @@ Archive::Ar - Interface for manipulating ar archives
 
 =head1 SYNOPSIS
 
-	use Archive::Ar;
+    use Archive::Ar;
 
-	my $ar = new Archive::Ar("./foo.ar");
+    my $ar = Archive::Ar->new;
 
-	$ar->add_data("newfile.txt","Some contents", $properties);
+    $ar->read('./foo.ar');
+    $ar->extract;
 
-	$ar->add_files("./bar.tar.gz", "bat.pl")
-	$ar->add_files(["./again.gz"]);
+    $ar->add_files('./bar.tar.gz', 'bat.pl')
+    $ar->add_data('newfile.txt','Some contents');
 
-	$ar->remove("file1", "file2");
-	$ar->remove(["file1", "file2");
+    $ar->chmod('file1', 0644);
+    $ar->chown('file1', $uid, $gid);
 
-	my $filedata = $ar->get_content("bar.tar.gz");
+    $ar->remove('file1', 'file2');
 
-	my @files = $ar->list_files();
-	$ar->read("foo.deb");
+    my $filehash = $ar->get_content('bar.tar.gz');
+    my $data = $ar->get_data('bar.tar.gz');
+    my $handle = $ar->get_handle('bar.tar.gz');
 
-	$ar->write("outbound.ar");
+    my @files = $ar->list_files();
 
-	$ar->DEBUG();
+    my $archive = $ar->write;
+    my $size = $ar->write('outbound.ar');
+
+    $ar->error();
 
 
 =head1 DESCRIPTION
 
 Archive::Ar is a pure-perl way to handle standard ar archives.  
 
-This is useful if you have those types of old archives on the system, but it 
+This is useful if you have those types of archives on the system, but it 
 is also useful because .deb packages for the Debian GNU/Linux distribution are 
 ar archives. This is one building block in a future chain of modules to build, 
 manipulate, extract, and test debian modules with no platform or architecture 
@@ -488,232 +539,245 @@ dependence.
 
 You may notice that the API to Archive::Ar is similar to Archive::Tar, and
 this was done intentionally to keep similarity between the Archive::*
-modules
+modules.
 
+=head1 METHODS
 
-=head2 Class Methods
+=head2 new
+
+  $ar = Archive::Ar->new()
+  $ar = Archive::Ar->new($filename)
+  $ar = Archive::Ar->new($filehandle)
+
+Returns a new Archive::Ar object.  Without an argument, it returns
+an empty object.  If passed a filename or an open filehandle, it will
+read the referenced archive into memory.  If the read fails for any
+reason, returns undef.
+
+=head2 set_opt
+
+  $ar->set_opt($name, $val)
+
+Assign option $name value $val.  Possible options are:
 
 =over 4
 
-=item * C<new()>
+=item * warn
 
-=item * C<new(I<$filename>)>
+Warning level.  Levels are zero for no warnings, 1 for brief warnings,
+and 2 for warnings with a stack trace.  Default is zero.
 
-=item * C<new(I<*GLOB>,I<$debug>)>
+=item * chmod
 
-Returns a new Archive::Ar object.  Without a filename or glob, it returns an
-empty object.  If passed a filename as a scalar or in a GLOB, it will attempt
-to populate from either of those sources.  If it fails, you will receive 
-undef, instead of an object reference. 
+Change the file permissions of files created when extracting.  Default
+is true (non-zero).
 
-This also can take a second optional debugging parameter.  This acts exactly
-as if C<DEBUG()> is called on the object before it is returned.  If you have a
-C<new()> that keeps failing, this should help.
+=item * same_perms
+
+When setting file permissions, use the values in the archive unchanged.
+If false, removes setuid bits and applies the user's umask.  Default is
+true for the root user, false otherwise.
+
+=item * chown
+
+Change the owners of extracted files, if possible.  Default is true.
+
+=item * type
+
+Archive type.  May be GNU, BSD or COMMON, or undef if no archive has
+been read.  Defaults to the type of the archive read, or undef.
 
 =back
 
-=over 4
+=head2 get_opt
 
-=item * C<read(I<$filename>)>
+  $val = $ar->get_opt($name)
 
-=item * C<read(I<*GLOB>)>;
+Returns the value of option $name.
+
+=head2 type
+
+  $type = $ar->type()
+
+Returns the type of the ar archive.  The type is undefined until an
+archive is loaded.  If the archive displays characteristics of a gnu-style
+archive, GNU is returned.  If it looks like a bsd-style archive, BSD
+is returned.  Otherwise, COMMON is returned.  Note that unless filenames
+exceed 16 characters in length, bsd archives look like the common format.
+
+=head2 clear
+
+  $ar->clear()
+
+Clears the current in-memory archive.
+
+=head2 read
+
+  $len = $ar->read($filename)
+  $len = $ar->read($filehandle)
 
 This reads a new file into the object, removing any ar archive already
-represented in the object.  Any calls to C<DEBUG()> are not lost by reading
-in a new file. Returns the number of bytes read, undef on failure.
+represented in the object.  The argument may be a filename, filehandle
+or IO::Handle object.  Returns the size of the file contents or undef
+if it fails.
 
-=back
+=head2 read_memory
 
-=over 4
+  $len = $ar->read_memory($data)
 
-=item * C<read_memory(I<$data>)>
+Parses the string argument as an archive, reading it into memory.  Replaces
+any previously loaded archive.  Returns the number of bytes read, or undef
+if it fails.
 
-This read information from the first parameter, and attempts to parse and treat
-it like an ar archive. Like C<read()>, it will wipe out whatever you have in the
-object and replace it with the contents of the new archive, even if it fails.
-Returns the number of bytes read (processed) if successful, undef otherwise.
+=head2 contains_file
 
-=back
+  $bool = $ar->contains_file($filename)
 
-=over 4
+Returns true if the archive contains a file with $filename.  Returns
+undef otherwise.
 
-=item * C<list_files()>
+=head2 extract
 
-This lists the files contained inside of the archive by filename, as an array.
+  $ar->extract()
+  $ar->extract_file($filename)
+
+Extracts files from the archive.  The first form extracts all files, the
+latter extracts just the named file.  Extracted files are assigned the
+permissions and modification time stored in the archive, and, if possible,
+the user and group ownership.  Returns non-zero upon success, or undef if
+failure.
+
+=head2 rename
+
+  $ar->rename($filename, $newname)
+
+Changes the name of a file in the in-memory archive.
+
+=head2 chmod
+
+  $ar->chmod($filename, $mode);
+
+Change the mode of the member to C<$mode>.
+
+=head2 chown
+
+  $ar->chown($filename, $uid, $gid);
+  $ar->chown($filename, $uid);
+
+Change the ownership of the member to user id C<$uid> and (optionally)
+group id C<$gid>.  Negative id values are ignored.
+
+=head2 remove
+
+  $ar->remove(@filenames)
+  $ar->remove($arrayref)
+
+Removes files from the in-memory archive.  Returns the number of files
+removed.
+
+=head2 list_files
+
+  @filenames = $ar->list_files()
+
+Returns a list of the names of all the files in the archive.
 If called in a scalar context, returns a reference to an array.
 
-=back
+=head2 add_files
 
-=over 4
+  $ar->add_files(@filenames)
+  $ar->add_files($arrayref)
 
-=item * C<add_files(I<"filename1">, I<"filename2">)>
+Adds files to the archive.  The arguments can be paths, but only the
+filenames are stored in the archive.  Stores the uid, gid, mode, size,
+and modification timestamp of the file as returned by C<stat()>.
 
-=item * C<add_files(I<["filename1", "filename2"]>)>
+Returns the number of files successfully added, or undef if failure.
 
-Takes an array or an arrayref of filenames to add to the ar archive, in order.
-The filenames can be paths to files, in which case the path information is 
-stripped off.  Filenames longer than 16 characters are truncated when written
-to disk in the format, so keep that in mind when adding files.
+=head2 add_data
 
-Due to the nature of the ar archive format, C<add_files()> will store the uid,
-gid, mode, size, and creation date of the file as returned by C<stat()>; 
+  $ar->add_data("filename", $data)
+  $ar->add_data("filename", $data, $options)
 
-C<add_files()> returns the number of files successfully added, or undef on failure.
+Adds a file to the in-memory archive with name $filename and content
+$data.  File properties can be set with $optional_hashref:
 
-=back
-
-=over 4
-
-=item * C<add_data(I<"filename">, I<$filedata>)>
-
-Takes an filename and a set of data to represent it. Unlike C<add_files>, C<add_data>
-is a virtual add, and does not require data on disk to be present. The
-data is a hash that looks like:
-
-	$filedata = {
-        "data" => $data,
-        "uid" => $uid, #defaults to zero
-        "gid" => $gid, #defaults to zero
-        "date" => $date,  #date in epoch seconds. Defaults to now.
-        "mode" => $mode, #defaults to 0100644;
-	}
+  $options = {
+      'data' => $data,
+      'uid' => $uid,    #defaults to zero
+      'gid' => $gid,    #defaults to zero
+      'date' => $date,  #date in epoch seconds. Defaults to now.
+      'mode' => $mode,  #defaults to 0100644;
+  }
 
 You cannot add_data over another file however.  This returns the file length in 
 bytes if it is successful, undef otherwise.
 
-=back
+=head2 write
 
-=over 4
+  $data = $ar->write()
+  $len = $ar->write($filename)
 
+Returns the archive as a string, or writes it to disk as $filename.
+Returns the archive size upon success when writing to disk.  Returns
+undef if failure.
 
-=item * C<write()>
+=head2 get_content
 
-=item * C<write(I<"filename.ar">)>
+  $content = $ar->get_content($filename)
 
-This method will return the data as an .ar archive, or will write to the 
-filename present if specified.  If given a filename, C<write()> will return the 
-length of the file written, in bytes, or undef on failure.  If the filename
-already exists, it will overwrite that file.
+This returns a hash with the file content in it, including the data
+that the file would contain.  If the file does not exist or no filename
+is given, this returns undef. On success, a hash is returned:
 
-=back
+    $content = {
+        'name' => $filename,
+        'date' => $mtime,
+        'uid' => $uid,
+        'gid' => $gid,
+        'mode' => $mode,
+        'size' => $size,
+        'data' => $file_contents,
+    }
 
-=over 4
+=head2 get_data
 
-=item * C<get_content(I<"filename">)>
+  $data = $ar->get_data("filename")
 
-This returns a hash with the file content in it, including the data that the 
-file would naturally contain.  If the file does not exist or no filename is
-given, this returns undef. On success, a hash is returned with the following
-keys:
+Returns a scalar containing the file data of the given archive
+member.  Upon error, returns undef.
 
-	name - The file name
-	date - The file date (in epoch seconds)
-	uid  - The uid of the file
-	gid  - The gid of the file
-	mode - The mode permissions
-	size - The size (in bytes) of the file
-	data - The contained data
+=head2 get_handle
 
-=back
+  $handle = $ar->get_handle(I<"filename">)>
 
+Returns a file handle to the in-memory file data of the given archive member.
+Upon error, returns undef.  This can be useful for unpacking nested archives.
+Uses IO::String if it's loaded.
 
-=over 4
+=head2 error
 
-=item * C<remove(I<"filename1">, I<"filename2">)>
+  $errstr = $ar->error($trace)
 
-=item * C<remove(I<["filename1", "filename2"]>)>
-
-The remove method takes a filenames as a list or as an arrayref, and removes
-them, one at a time, from the Archive::Ar object.  This returns the number
-of files successfully removed from the archive.
-
-=back
-
-=over 4
-
-=item * C<DEBUG()>
-
-This method turns on debugging.  Optionally this can be done by passing in a 
-value as the second parameter to new.  While verbosity is enabled, 
-Archive::Ar will toss a C<warn()> if there is a suspicious condition or other 
-problem while proceeding. This should help iron out any problems you have
-while using the module.
-
-=back
-
-=head1 CHANGES
-
-=over 4
-
-=item * B<Version 1.15> - May 14, 2013
-
-Use binmode for portability.  Closes RT #81310 (thanks to Stanislav Meduna).
-
-=item * B<Version 1.14> - October 14, 2009
-
-Fix list_files to return a list in list context, to match doc.
-
-Pad odd-size archives to an even number of bytes.
-Closes RT #18383 (thanks to David Dick).
-
-Fixed broken file perms (decimal mode stored as octal string).
-Closes RT #49987 (thanks to Stephen Gran - debian bug #523515).
-
-=item * B<Version 1.13b> - May 7th, 2003
-
-Fixes to the Makefile.PL file. Ar.pm wasn't being put into /blib
-Style fix to a line with non-standard unless parenthesis
-
-=item * B<Version 1.13> - April 30th, 2003
-
-Removed unneeded exports. Thanks to pudge for the pointer.
-
-=item * B<Version 1.12> - April 14th, 2003
-
-Found podchecker. CPAN HTML documentation should work right now.
-
-=item * B<Version 1.11> - April 10th, 2003
-
-Trying to get the HTML POD documentation to come out correctly
-
-=item * B<Version 1.1> - April 10th, 2003
-
-Documentation cleanups
-Added a C<remove()> function
-
-=item * B<Version 1.0> - April 7th, 2003
-
-This is the initial public release for CPAN, so everything is new.
-
-=back
-
-=head1 TODO
-
-A better unit test suite perhaps. I have a private one, but a public one would be
-nice if there was good file faking module.
-
-Fix / investigate stuff in the BUGS section.
+Returns the current error string, which is usually the last error reported.
+If a true value is provided, returns the error message and stack trace.
 
 =head1 BUGS
 
-To be honest, I'm not sure of a couple of things. The first is that I know 
-of ar archives made on old AIX systems (pre 4.3?) that have a different header
-with a different magic string, etc.  This module perfectly (hopefully) handles
-ar archives made with the modern ar command from the binutils distribution. If
-anyone knows of anyway to produce these old-style AIX archives, or would like
-to produce a few for testing, I would be much grateful.
+See https://github.com/jbazik/Archive-Ar/issues/ to report and view bugs.
 
-There's no really good reason why this module I<shouldn't> run on Win32 
-platforms, but admittedly, this might change when we have a file exporting 
-function that supports owner and permission writing.
+=head1 SOURCE
 
-If you read in and write out a file, you get different md5sums, but it's still
-a valid archive. I'm still investigating this, and consider it a minor bug.
+The source code repository for Archive::Ar can be found at http://github.com/jbazik/Archive-Ar/.
 
 =head1 COPYRIGHT
 
-Archive::Ar is copyright 2003 Jay Bonci E<lt>jaybonci@cpan.orgE<gt>. 
+Copyright 2009-2014 John Bazik E<lt>jbazik@cpan.orgE<gt>.
+
+Copyright 2003 Jay Bonci E<lt>jaybonci@cpan.orgE<gt>. 
+
 This program is free software; you can redistribute it and/or modify it under
 the same terms as Perl itself.
+
+See http://www.perl.com/perl/misc/Artistic.html
 
 =cut

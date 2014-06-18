@@ -5,10 +5,9 @@ WriteMakefile(
 	'VERSION_FROM'	=> 'lib/Archive/Ar.pm', # finds $VERSION
 	'PREREQ_PM'	=>
 		{ 
-			'Test::More' => '0.45',
-			'File::Spec' => '0.83',
-			'Time::Local' => '1.04',
-			'Test::MockObject' => '0.12',
+			'Test::More' => '0',
+			'Test::MockObject' => '0',
+			'File::Spec' => '0',
 			'File::Temp' => '0',
 		},
 
@@ -24,5 +23,19 @@ WriteMakefile(
 			ABSTRACT_FROM	=> 'lib/Archive/Ar.pm', # retrieve abstract from module
 			AUTHOR     	=> 'Jay Bonci <jay@bonci.com>') 
 		: ()),
+
+	META_MERGE	=>
+		{
+			'meta-spec' => { version => 2 },
+			resources =>
+				{
+					repository =>
+						{
+							type => 'git',
+							url  => 'https://github.com/jbazik/Archive-Ar.git',
+							web  => 'https://github.com/jbazik/Archive-Ar',
+						},
+				},
+		},
 );
 
