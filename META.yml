@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Archive-Ar
-version:            2.01
+version:            2.02
 abstract:           Interface for manipulating ar archives
 author:
     - Jay Bonci <jay@bonci.com>
